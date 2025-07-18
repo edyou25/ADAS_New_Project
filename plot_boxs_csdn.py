@@ -47,17 +47,9 @@ def get_camera_intrinsic(width, height, fov):
     return K
 
 def get_extrinsic_matrix(camera_transform):
-    """
-    得到相机的4x4外参矩阵，相机->世界
-    """
     return np.array(camera_transform.get_matrix())
 
 def world_to_camera_blog(world_points, extrinsic):
-    """
-    world_points: (N,3)
-    extrinsic: 4x4 相机->世界
-    返回 shape (4, N)
-    """
     num_pts = world_points.shape[0]
     homo_world = np.concatenate([world_points, np.ones((num_pts,1))], axis=1)  # (N,4)
     extrinsic_inv = np.linalg.inv(extrinsic)  # 世界->相机
@@ -75,10 +67,10 @@ def camera_to_pixel_blog(cam_xyz, K):
     points_2d[1, :] = points_2d_homo[1, :] / points_2d_homo[2, :]
     return points_2d
 
-def is_in_camera_fov(ego_tf, actor_loc, camera_fov_deg):
-    ego_yaw = np.deg2rad(ego_tf.rotation.yaw)
+def is_in_camera_fov(camera_tf, actor_loc, camera_fov_deg):
+    ego_yaw = np.deg2rad(camera_tf.rotation.yaw)
     forward = np.array([math.cos(ego_yaw), math.sin(ego_yaw)])
-    ego_xy = np.array([ego_tf.location.x, ego_tf.location.y])
+    ego_xy = np.array([camera_tf.location.x, camera_tf.location.y])
     actor_xy = np.array([actor_loc.x, actor_loc.y])
     to_actor = actor_xy - ego_xy
     to_actor_norm = np.linalg.norm(to_actor)
@@ -90,9 +82,6 @@ def is_in_camera_fov(ego_tf, actor_loc, camera_fov_deg):
     return angle <= (camera_fov_deg / 2)
 
 def get_bbox_3d(actor):
-    """
-    获取actor的3D bounding box八个顶点的世界坐标
-    """
     bbox = actor.bounding_box
     extent = bbox.extent
     # 8个顶点在局部坐标系
@@ -139,18 +128,15 @@ def draw_3d_box(image, pts, color=(0,255,0), thickness=2):
 
 def draw_fixed_bbox_on_image(
     image, world, camera_transform, camera_K,
-    max_distance=50.0, ego_vehicle=None, camera_fov_deg=70
+    max_distance=50.0, ego_vehicle=None, camera_fov_deg=90
 ):
     actors = []
     actors += world.get_actors().filter('vehicle.*')
     actors += world.get_actors().filter('walker.*')
+    actors += world.get_actors().filter('bicycle.*')
+    actors += world.get_actors().filter('motorcycle.*')
     cam_loc = camera_transform.location
     selected_actors = []
-
-    if ego_vehicle is not None:
-        ego_tf = ego_vehicle.get_transform()
-    else:
-        ego_tf = None
 
     for actor in actors:
         if ego_vehicle is not None and actor.id == ego_vehicle.id:
@@ -159,7 +145,8 @@ def draw_fixed_bbox_on_image(
         dist = cam_loc.distance(actor_loc)
         if dist >= max_distance:
             continue
-        if ego_tf is not None and not is_in_camera_fov(ego_tf, actor_loc, camera_fov_deg):
+        # 用相机坐标与朝向做FOV筛选
+        if not is_in_camera_fov(camera_transform, actor_loc, camera_fov_deg):
             continue
         selected_actors.append((actor, actor_loc))
 
@@ -168,42 +155,16 @@ def draw_fixed_bbox_on_image(
     for actor, center in selected_actors:
         type_id = actor.type_id
 
-        # 判断是否是自行车或摩托车
-        if ('vehicle.bicycle' in type_id) or ('vehicle.motorcycle' in type_id):
-            # 预设尺寸
-            preset_extent = carla.Vector3D(0.9, 0.3, 0.8)   # 长宽高的一半
-            bbox_location = actor.bounding_box.location
-            bbox_rotation = actor.bounding_box.rotation
-            bbox_transform = carla.Transform(bbox_location, bbox_rotation)
-            actor_transform = actor.get_transform()
-            # 计算8个顶点
-            corners = np.array([
-                [ preset_extent.x,  preset_extent.y,  preset_extent.z],
-                [ preset_extent.x, -preset_extent.y,  preset_extent.z],
-                [-preset_extent.x, -preset_extent.y,  preset_extent.z],
-                [-preset_extent.x,  preset_extent.y,  preset_extent.z],
-                [ preset_extent.x,  preset_extent.y, -preset_extent.z],
-                [ preset_extent.x, -preset_extent.y, -preset_extent.z],
-                [-preset_extent.x, -preset_extent.y, -preset_extent.z],
-                [-preset_extent.x,  preset_extent.y, -preset_extent.z],
-            ])
-            world_corners = []
-            for corner in corners:
-                loc = carla.Location(x=corner[0], y=corner[1], z=corner[2])
-                loc = bbox_transform.transform(loc)
-                loc = actor_transform.transform(loc)
-                world_corners.append([loc.x, loc.y, loc.z])
-            bbox_3d = np.array(world_corners)
+        # 统一用真实的bounding_box
+        bbox_3d = get_bbox_3d(actor)
+        if ('bicycle' in type_id) or ('motorcycle' in type_id):
             box_color = (200, 60, 255)  # 紫色
+        elif 'vehicle.' in type_id:
+            box_color = (0, 255, 0)     # 绿色
+        elif 'walker.pedestrian.' in type_id:
+            box_color = (255, 100, 0)   # 橙色
         else:
-            bbox_3d = get_bbox_3d(actor)
-            # 其它类型颜色
-            if 'vehicle.' in type_id:
-                box_color = (0, 255, 0)
-            elif 'walker.pedestrian.' in type_id:
-                box_color = (255, 100, 0)
-            else:
-                box_color = (128, 128, 128)
+            box_color = (200, 60, 255) # 紫色
 
         cam_xyz = world_to_camera_blog(bbox_3d, extrinsic)
         zs = cam_xyz[2, :]
@@ -212,11 +173,11 @@ def draw_fixed_bbox_on_image(
         xs_valid = np.logical_and(xs >= 0, xs < image.shape[1])
         ys_valid = np.logical_and(ys >= 0, ys < image.shape[0])
 
-        # 宽松筛选
-        if not np.any(zs < 0):
-            continue
-        if np.sum(xs_valid & ys_valid) < 2:
-            continue
+        # # 宽松筛选
+        # if not np.any(zs < 0):
+        #     continue
+        # if np.sum(xs_valid & ys_valid) < 0:
+        #     continue
 
         pts_2d = np.stack([xs, ys], axis=1)
         draw_3d_box(image, pts_2d, color=box_color, thickness=1)
@@ -227,67 +188,154 @@ def draw_fixed_bbox_on_image(
 
     return image, len(selected_actors)
 
-# def draw_fixed_bbox_on_image(
-#     image, world, camera_transform, camera_K,
-#     max_distance=100.0, ego_vehicle=None, camera_fov_deg=70
-# ):
-#     actors = []
-#     actors += world.get_actors().filter('vehicle.*')
-#     actors += world.get_actors().filter('walker.*')
-#     cam_loc = camera_transform.location
-#     selected_actors = []
 
-#     if ego_vehicle is not None:
-#         ego_tf = ego_vehicle.get_transform()
-#     else:
-#         ego_tf = None
 
-#     for actor in actors:
-#         if ego_vehicle is not None and actor.id == ego_vehicle.id:
-#             continue
-#         actor_loc = actor.get_location()
-#         dist = cam_loc.distance(actor_loc)
-#         if dist >= max_distance:
-#             continue
-#         if ego_tf is not None and not is_in_camera_fov(ego_tf, actor_loc, camera_fov_deg):
-#             continue
-#         selected_actors.append((actor, actor_loc))
+def predict_bicycle_trajectory(vehicle, predict_time=5.0, dt=0.5, wheelbase=2.8):
+    # 获取自车状态
+    tf = vehicle.get_transform()
+    x0, y0, z0 = tf.location.x, tf.location.y, tf.location.z
+    yaw = math.radians(tf.rotation.yaw)
+    v3d = vehicle.get_velocity()
+    v = math.sqrt(v3d.x**2 + v3d.y**2 + v3d.z**2) # m/s
+    v = max(v, 3.0)
 
-#     extrinsic = get_extrinsic_matrix(camera_transform)
+    # 近似前轮转角
+    # 通常CARLA没有直接前轮角度，steer范围[-1,1]，最大角约0.7rad
+    steer = vehicle.get_control().steer
+    delta_max = 0.35 # 最大转角（弧度），你可根据车型调整
+    delta = steer * delta_max
 
-#     for actor, center in selected_actors:
-#         bbox_3d = get_bbox_3d(actor)  # (8,3)
-#         cam_xyz = world_to_camera_blog(bbox_3d, extrinsic)  # (4,8)
-#         zs = cam_xyz[2, :]
-#         pixels = camera_to_pixel_blog(cam_xyz, camera_K)  # (2,8)
-#         xs, ys = pixels[0, :], pixels[1, :]
-#         xs_valid = np.logical_and(xs >= 0, xs < image.shape[1])
-#         ys_valid = np.logical_and(ys >= 0, ys < image.shape[0])
+    # 仿真轨迹
+    num_steps = int(predict_time / dt)
+    traj = []
+    x, y, yaw_ = x0, y0, yaw
+    for _ in range(num_steps):
+        x += v * np.cos(yaw_) * dt
+        y += v * np.sin(yaw_) * dt
+        yaw_ += v / wheelbase * np.tan(delta) * dt
+        traj.append([x, y, z0 + 0.5])  # z略上提，避免地面遮挡
+    traj = np.array(traj)  # (N, 3)
+    return traj
 
-#         # 只要有至少1个点在前方（z<0），就绘制
-#         if not np.any(zs < 0):
-#             continue
-#         # 只要有2个点在画幅内，就绘制
-#         if np.sum(xs_valid & ys_valid) < 2:
-#             continue
+# def draw_trajectory_on_image(image, traj_world, camera_transform, camera_K, extrinsic, alpha=0.6):
+#     cam_xyz = world_to_camera_blog(traj_world, extrinsic)
+#     zs = cam_xyz[2, :]
+#     valid = zs < 0
+#     # if np.sum(valid) < 2:
+#     #     return image
+#     cam_xyz_valid = cam_xyz[:, valid]
+#     pixels = camera_to_pixel_blog(cam_xyz_valid, camera_K)
+#     xs, ys = pixels[0, :], pixels[1, :]
+#     h, w = image.shape[:2]
+#     mask = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+#     xs, ys = xs[mask], ys[mask]
 
-#         pts_2d = np.stack([xs, ys], axis=1)  # (8,2)
+#     overlay = image.copy()  # 复制一层
+#     # 在 overlay 上画粗的青色线
+#     for i in range(len(xs)-1):
+#         pt1 = (int(xs[i]), int(ys[i]))
+#         pt2 = (int(xs[i+1]), int(ys[i+1]))
+#         cv2.line(overlay, pt1, pt2, (255, 255, 0), 90)
 
-#         # 按类型分颜色
-#         if 'vehicle.' in actor.type_id:
-#             color = (0, 255, 0)    # 绿色
-#         elif 'walker.pedestrian.' in actor.type_id:
-#             color = (255, 100, 0)  # 橙色
-#         else:
-#             color = (128, 128, 128)
+#     # 融合
+#     result = cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
+#     return result
 
-#         draw_3d_box(image, pts_2d, color=color, thickness=1)
-#         # id在顶面左上角
-#         top_idx = np.argmin(xs[:4] + ys[:4])
-#         cv2.putText(image, f"id:{actor.id}", (int(xs[top_idx]), int(ys[top_idx])-5),
-#                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 1)
 
-#     return image, len(selected_actors)
+def draw_trajectory_on_image(image, traj_world, camera_transform, camera_K, extrinsic, 
+                            alpha=0.5, min_thickness=100, max_thickness=150):
+    cam_xyz = world_to_camera_blog(traj_world, extrinsic)
+    zs = cam_xyz[2, :]
+    valid = zs < 0
+    if np.sum(valid) < 2:
+        return image
+    cam_xyz_valid = cam_xyz[:, valid]
+    pixels = camera_to_pixel_blog(cam_xyz_valid, camera_K)
+    xs, ys, zvals = pixels[0, :], pixels[1, :], cam_xyz_valid[2, :]
+    h, w = image.shape[:2]
+    mask = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+    idxs = np.where(mask)[0]  # 保证顺序不乱
+    if len(idxs) < 2:
+        return image
+    xs, ys, zvals = xs[idxs], ys[idxs], zvals[idxs]
+    
+    overlay = image.copy()
+    z_near = -zvals[0]
+    z_far = -zvals[-1]
+    if abs(z_far - z_near) < 1e-3:
+        z_far = z_near + 1e-3  # 防止除零
+    for i in range(len(xs)-1):
+        z1 = -zvals[i]
+        # 线性插值线宽。z_near为近端，z_far为远端
+        thickness = int(
+            max_thickness - (max_thickness-min_thickness) * ((z1 - z_near)/(z_far - z_near))
+        )
+        thickness = np.clip(thickness, min_thickness, max_thickness)
+        pt1 = (int(xs[i]), int(ys[i]))
+        pt2 = (int(xs[i+1]), int(ys[i+1]))
+        cv2.line(overlay, pt1, pt2, (255,255,0), thickness)
+    result = cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
+    return result
+
+def draw_steering_arrow(image, steer, mode="lane_change"):
+    height, width = image.shape[:2]
+    color = (0, 255, 255)
+    thickness = 8
+    tipLength = 0.3
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.2
+    font_thickness = 3
+
+    length = int(width * 0.12)
+
+    # 默认：居中下方
+    action_text = "Lane Keeping"
+    center = (int(width * 0.5), int(height * 0.8))
+    end = (center[0], center[1] - length)
+
+    # 文字默认放中下
+    textsize = cv2.getTextSize(action_text, font, font_scale, font_thickness)[0]
+    text_org = (center[0] - textsize[0] // 2, min(center[1] + 60, height - 10))
+
+    if mode == "lane_change":
+        if steer > 0.30:
+            # 右转
+            action_text = "Right Turn"
+            center = (int(width * 0.85), int(height * 0.85))
+            end = (center[0] + length, center[1])
+        elif steer < -0.30:
+            # 左转
+            action_text = "Left Turn"
+            center = (int(width * 0.15), int(height * 0.85))
+            end = (center[0] - length, center[1])
+        elif steer > 0.03:
+            # 右变道
+            action_text = "Right Lane Change"
+            center = (int(width * 0.85), int(height * 0.85))
+            end = (center[0] + length, center[1])
+        elif steer < -0.03:
+            # 左变道
+            action_text = "Left Lane Change"
+            center = (int(width * 0.15), int(height * 0.85))
+            end = (center[0] - length, center[1])
+        else:
+            # 车道保持
+            action_text = "Lane Keeping"
+            center = (int(width * 0.5), int(height * 0.8))
+            end = (center[0], center[1] - length)
+
+        # 统一文字位置
+        textsize = cv2.getTextSize(action_text, font, font_scale, font_thickness)[0]
+        text_org = (center[0] - textsize[0] // 2, min(center[1] + 60, height - 10))
+
+
+    # 画箭头
+    cv2.arrowedLine(image, center, end, color, thickness, tipLength=tipLength)
+    # 画带黑边的文字
+    cv2.putText(image, action_text, text_org, font, font_scale, (0, 0, 0), font_thickness+2, cv2.LINE_AA)
+    cv2.putText(image, action_text, text_org, font, font_scale, color, font_thickness, cv2.LINE_AA)
+    return image
 
 
 def run_simulation(cfg, client):
@@ -312,19 +360,35 @@ def run_simulation(cfg, client):
         QUEUE_LEN = cfg['queue_length']
         CAMERA_FOV = cfg['cam_fov']
 
-        # 相机位置推荐放在车头前方2.5米、离地1.7米、俯视10度
-        camera_rgb = init_camera(
+        # 车载相机
+        camera_onboard = init_camera(
             world, 'RGBCamera',
-            carla.Transform(carla.Location(x=0.0, z=2.4), carla.Rotation(pitch=0, yaw=0)),
+            carla.Transform(carla.Location(x=0.0, y=0.0, z=2.0), carla.Rotation(pitch=0, yaw=0, roll=0)),
             vehicle, IM_WIDTH, IM_HEIGHT, CAMERA_FOV
         )
-        actor_list.append(camera_rgb)
-        image_rgb_queue = []
-        camera_rgb.listen(lambda image: process_rgb_image(image, image_rgb_queue, QUEUE_LEN))
+        actor_list.append(camera_onboard)
+        camera_onboard_img_queue = []
+        camera_onboard.listen(lambda image: process_rgb_image(image, camera_onboard_img_queue, QUEUE_LEN))
 
-        K = get_camera_intrinsic(IM_WIDTH, IM_HEIGHT, CAMERA_FOV)
-        print(f"camera_rgb.attributes: {camera_rgb.attributes}")
+        # road side 相机
+        CAMERA_FOV_INTECTION = 120
+        camera_intection = init_camera(
+            world, 'RGBCamera',
+            carla.Transform(carla.Location(x=120.0, y=20.0, z=10), carla.Rotation(pitch=-20, yaw=180, roll=0)),
+            None, IM_WIDTH, IM_HEIGHT, CAMERA_FOV_INTECTION
+        )
+        actor_list.append(camera_intection)
+        camera_intection_img_queue = []
+        camera_intection.listen(lambda image: process_rgb_image(image, camera_intection_img_queue, QUEUE_LEN))
 
+        K_onboard = get_camera_intrinsic(IM_WIDTH, IM_HEIGHT, CAMERA_FOV)
+        K_intection = get_camera_intrinsic(IM_WIDTH, IM_HEIGHT, CAMERA_FOV_INTECTION)
+        print(f"camera_onboard.attributes: {camera_onboard.attributes}")
+        print(f"camera_intection.attributes: {camera_intection.attributes}")
+
+
+        target_fps = 30
+        target_period = 1.0 / target_fps  # 单位：秒
         while True:
             if cfg['sync_mode']:
                 world.tick()
@@ -336,45 +400,49 @@ def run_simulation(cfg, client):
             ego_velocity_kmh = round(ego_velocity_ms * 3.6, 1)
             wheel_angle = 0
 
-            spectator = world.get_spectator()
-            ego_yaw = math.radians(vehicle.get_transform().rotation.yaw)
-            spectator.set_transform(carla.Transform(
-                ego_tf.location + carla.Location(x=-10*math.cos(ego_yaw), y=-10*math.sin(ego_yaw), z=7.5),
-                carla.Rotation(pitch=-30, yaw=math.degrees(ego_yaw)))
-            )
 
-            if len(image_rgb_queue) > 1:
-                image_rgb = image_rgb_queue[-1].copy()
-                camera_world_tf = camera_rgb.get_transform()
-                image_rgb, num_actors = draw_fixed_bbox_on_image(
-                    image_rgb, world, camera_world_tf, K,
+            if len(camera_intection_img_queue) > 1:
+                image_intection = camera_intection_img_queue[-1].copy()
+                camera_intection_tf = camera_intection.get_transform()
+                image_intection, num_actors = draw_fixed_bbox_on_image(
+                    image_intection, world, camera_intection_tf, K_intection,
+                    max_distance=90.0, ego_vehicle=vehicle, camera_fov_deg=CAMERA_FOV_INTECTION)
+                cv2.imshow("intection", image_intection)
+                
+            if len(camera_onboard_img_queue) > 1:
+                image_onboard = camera_onboard_img_queue[-1].copy()
+                camera_world_tf = camera_onboard.get_transform()
+
+                extrinsic = get_extrinsic_matrix(camera_world_tf)
+                # 预测轨迹\画轨迹
+                traj = predict_bicycle_trajectory(vehicle, predict_time=3.0, dt=0.1, wheelbase=2.8)
+                image_onboard = draw_trajectory_on_image(
+                    image_onboard, traj, camera_world_tf, K_onboard, extrinsic
+                )
+                # 画转向箭头
+                steer = vehicle.get_control().steer
+                image_onboard = draw_steering_arrow(image_onboard, steer, mode="lane_change")
+
+                # 画3D包围盒
+                image_onboard, num_actors = draw_fixed_bbox_on_image(
+                    image_onboard, world, camera_world_tf, K_onboard,
                     max_distance=70.0, ego_vehicle=vehicle, camera_fov_deg=CAMERA_FOV)
                 print(f"Number of selected actors: {num_actors}")
-
-                # 打印自车tf
-                ego_tf = vehicle.get_transform()
-                print(f"==== 自车 ego tf ====")
-                print(f"ego id={vehicle.id}, "
-                      f"location=({ego_tf.location.x:.2f},{ego_tf.location.y:.2f},{ego_tf.location.z:.2f}), "
-                      f"rotation=({ego_tf.rotation.pitch:.2f},{ego_tf.rotation.yaw:.2f},{ego_tf.rotation.roll:.2f})")
-                print("=====================")
-
-                # 打印相机tf
-                camera_tf = camera_rgb.get_transform()
-                print(f"==== 相机 camera tf ====")
-                print(f"camera id={camera_rgb.id}, "
-                      f"location=({camera_tf.location.x:.2f},{camera_tf.location.y:.2f},{camera_tf.location.z:.2f}), "
-                      f"rotation=({camera_tf.rotation.pitch:.2f},{camera_tf.rotation.yaw:.2f},{camera_tf.rotation.roll:.2f})")
-                print("======================")
-
                 speed_inform =       "Speed:       " + str(ego_velocity_kmh) + " km/h"
                 wheel_angle_inform = "Wheel angle: " + str(round(wheel_angle,2))
-                cv2.putText(image_rgb, speed_inform, (30, 35), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
-                cv2.putText(image_rgb, wheel_angle_inform, (30, 60), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
-                cv2.imshow("output", image_rgb)
+                cv2.putText(image_onboard, speed_inform, (30, 35), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
+                cv2.putText(image_onboard, wheel_angle_inform, (30, 60), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
+
+                cv2.imshow("onboard", image_onboard)
                 cv2.waitKey(5)
 
             time_end = time.time()
+            elapsed = time_end - time_start
+            sleep_time = target_period - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            # 可选：打印帧率和本帧耗时
+            print(f"Loop time: {elapsed*1000:.2f} ms, FPS: {1.0/max(elapsed, target_period):.2f}")
 
     finally:
         for actor in actor_list:

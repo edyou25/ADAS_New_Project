@@ -1,0 +1,97 @@
+[
+    {
+        "behavior_type": "right_turn",
+        "scenario_id": 0,
+        "weather": "raining",
+        "ego_speed_limit": 55,
+        "ego_start_point": {
+            "x": -305.61,
+            "y": -112.70,
+            "z": 8,
+            "yaw": 179
+        },
+        "ego_end_point": {
+            "x": -389.5,
+            "y": -241.4,
+            "z": 10,
+            "yaw": -89,
+            "buff": 1
+        }
+    },
+    {
+        "behavior_type": "right_turn",
+        "scenario_id": 1,
+        "weather": "raining",
+        "ego_speed_limit": 55,
+        "ego_start_point": {
+            "x": -413.51,
+            "y": -366.40,
+            "z": 8,
+            "yaw": -112
+        },
+        "ego_end_point": {
+            "x": -378.8,
+            "y": -465.9,
+            "z": 9,
+            "yaw": -33,
+            "buff": 1
+        }
+    },
+    {
+        "behavior_type": "right_turn",
+        "scenario_id": 2,
+        "weather": "raining",
+        "ego_speed_limit": 55,
+        "ego_start_point": {
+            "x": 138.38,
+            "y": -15.7,
+            "z": 7,
+            "yaw": 16
+        },
+        "ego_end_point": {
+            "x": 247.6,
+            "y": 33.7,
+            "z": 4,
+            "yaw": 89,
+            "buff": 1
+        }
+    },
+    {
+        "behavior_type": "right_turn",
+        "scenario_id": 3,
+        "weather": "raining",
+        "ego_speed_limit": 55,
+        "ego_start_point": {
+            "x": 29.1,
+            "y": -112.3,
+            "z": 4,
+            "yaw": 133
+        },
+        "ego_end_point": {
+            "x": -87.8,
+            "y": -102.1,
+            "z": 6,
+            "yaw": -160,
+            "buff": 1
+        }
+    },
+    {
+        "behavior_type": "right_turn",
+        "scenario_id": 4,
+        "weather": "raining",
+        "ego_speed_limit": 55,
+        "ego_start_point": {
+            "x": -165.9,
+            "y": 535.6,
+            "z": 5,
+            "yaw": 98
+        },
+        "ego_end_point": {
+            "x": -255.3,
+            "y": 568.4,
+            "z": 5,
+            "yaw": 171,
+            "buff": 1
+        }
+    }
+]

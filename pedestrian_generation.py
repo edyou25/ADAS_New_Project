@@ -1,7 +1,7 @@
 import carla
 import random
 import asyncio
-from routes import coordinates_list
+from pedestrian_routes import coordinates_list
 
 def create_route_from_coordinates(coordinates):
     return [carla.Location(x=coord[0], y=coord[1], z=coord[2]) for coord in coordinates]

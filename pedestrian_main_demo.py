@@ -13,7 +13,7 @@ import torch
 import cv2
 from multiprocessing import Process, Queue
 
-from routes import coordinates_list
+from pedestrian_routes import coordinates_list
 from porcess_trajectory import Processor
 from predict_trajectory import Predictor
 

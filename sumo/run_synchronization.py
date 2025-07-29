@@ -147,10 +147,19 @@ class SimulationSynchronization(object):
         # Updates traffic lights in carla based on sumo information.
         if self.tls_manager == 'sumo':
             common_landmarks = self.sumo.traffic_light_ids & self.carla.traffic_light_ids
+
+            # ---- 就在这里加 ----
+            # print("========================================================")
+            # print("SUMO灯ID:", sorted(self.sumo.traffic_light_ids))
+            # print("CARLA灯ID:", sorted(self.carla.traffic_light_ids))
+            # print("同步的灯ID:", sorted(common_landmarks))
+            # # ---- 结束 ----
+
             for landmark_id in common_landmarks:
                 sumo_tl_state = self.sumo.get_traffic_light_state(landmark_id)
                 carla_tl_state = BridgeHelper.get_carla_traffic_light_state(sumo_tl_state)
 
+                # print(f"[SYNC] {landmark_id} SUMO={sumo_tl_state} -> CARLA={carla_tl_state}")
                 self.carla.synchronize_traffic_light(landmark_id, carla_tl_state)
 
         # -----------------

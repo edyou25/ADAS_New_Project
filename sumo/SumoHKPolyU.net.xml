@@ -3814,12 +3814,12 @@
         <phase duration="4"  state="yyyrrrryyyrrrr"/>
     </tlLogic>
     <tlLogic id="1460" type="static" programID="0" offset="0">
-        <phase duration="41" state="rrGGGrrGGG"/>
-        <phase duration="4"  state="rryyyrryyy"/>
-        <phase duration="41" state="GGrrrGGrrr"/>
-        <phase duration="4"  state="yyrrryyrrr"/>
+        <phase duration="20" state="rrGGGrrGGG"/>
+        <phase duration="0.1"  state="rryyyrryyy"/>
+        <phase duration="3" state="GGrrrGGrrr"/>
+        <phase duration="0.1"  state="yyrrryyrrr"/>
     </tlLogic>
-    <tlLogic id="356" type="static" programID="0" offset="0">
+    <!-- <tlLogic id="356" type="static" programID="0" offset="0">
         <phase duration="29" state="GGGgrrrrrrGGGrrrrrrr"/>
         <phase duration="5"  state="yyygrrrrrryyyrrrrrrr"/>
         <phase duration="6"  state="rrrGrrrrrrrrrGrrrrrr"/>
@@ -3828,12 +3828,26 @@
         <phase duration="5"  state="rrrryyyyggrrrryyyyyg"/>
         <phase duration="6"  state="rrrrrrrrGGrrrrrrrrrG"/>
         <phase duration="5"  state="rrrrrrrryyrrrrrrrrry"/>
+    </tlLogic> -->
+    <tlLogic id="356" type="static" programID="0" offset="0">
+        <!-- 东西直行+左转 -->
+        <phase duration="0.5" state="GGGgrrrrrrGGGrrrrrrr"/>
+        <phase duration="0.01"  state="yyygrrrrrryyyrrrrrrr"/>
+        <!-- 东西左转专用 -->
+        <phase duration="0.5" state="rrrGrrrrrrrrrGrrrrrr"/>
+        <phase duration="0.01"  state="rrryrrrrrrrrryrrrrrr"/>
+        <!-- 南北直行+左转 -->
+        <phase duration="20" state="rrrrGGGGggrrrrGGGGGg"/>
+        <phase duration="0.5"  state="rrrryyyyggrrrryyyyyg"/>
+        <!-- 南北左转专用 -->
+        <phase duration="7" state="rrrrrrrrGGrrrrrrrrrG"/>
+        <phase duration="0.2"  state="rrrrrrrryyrrrrrrrrry"/>
     </tlLogic>
     <tlLogic id="665" type="static" programID="0" offset="0">
-        <phase duration="41" state="GGGrrrr"/>
-        <phase duration="4"  state="yyyrrrr"/>
-        <phase duration="41" state="rrrGGGG"/>
-        <phase duration="4"  state="rrryyyy"/>
+        <phase duration="5" state="GGGrrrr"/>
+        <phase duration="1"  state="yyyrrrr"/>
+        <phase duration="15" state="rrrGGGG"/>
+        <phase duration="1"  state="rrryyyy"/>
     </tlLogic>
     <tlLogic id="706" type="static" programID="0" offset="0">
         <phase duration="41" state="rrrrGGGgrrrrGGGgg"/>

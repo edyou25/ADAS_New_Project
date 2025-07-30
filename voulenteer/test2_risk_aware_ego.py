@@ -752,7 +752,8 @@ class CameraManager(object):
         self.recording = False
         self._camera_transforms = [
             carla.Transform(carla.Location(x=-5.5, z=2.8), carla.Rotation(pitch=-15)),
-            carla.Transform(carla.Location(x=0.0, y=0.2,z=1.2))]
+            carla.Transform(carla.Location(x=0.42, y=0.27,z=1.4),carla.Rotation(pitch=-10))]
+        # carla.Transform(carla.Location(x=0.3, y=0.35,z=1.3),carla.Rotation(pitch=-15))]
         self.transform_index = 1
         self.sensors = [
             ['sensor.camera.rgb', cc.Raw, 'Camera RGB'],
@@ -770,7 +771,7 @@ class CameraManager(object):
             if item[0].startswith('sensor.camera'):
                 bp.set_attribute('image_size_x', str(hud.dim[0]))
                 bp.set_attribute('image_size_y', str(hud.dim[1]))
-                bp.set_attribute('fov', str(100))
+                bp.set_attribute('fov', str(130))
             elif item[0].startswith('sensor.lidar'):
                 bp.set_attribute('range', '50')
             item.append(bp)
@@ -844,10 +845,21 @@ class CameraManager(object):
                 ego_risk = hud_info.ego_risk
 
                 array = cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
-                # cv2.putText(array, str(self.ego_risk), (600, 335), cv2.FONT_HERSHEY_COMPLEX, 0.9, (0, 0, 255), 1)
-                
-                x = 1700  # 指示条的左上角 x 坐标
-                y = 900  # 指示条的左上角 y 坐标
+                # array = where_is_risk(array, 0, ego_risk)
+                left_image = hud_info.left_mirror
+                right_image = hud_info.right_mirror
+                big_h, big_w, _ = array.shape
+                small_h1, small_w1, _ = left_image.shape
+                small_h2, small_w2, _ = right_image.shape
+                x1 = 300
+                y1 = 500
+                x2 = big_w - small_w2 - x1 
+                y2 = y1
+                array[y1:y1+small_h1, x1:x1+small_w1] = left_image
+                array[y2:y2+small_h2, x2:x2+small_w2] = right_image
+
+                x = int(big_w/3*2)  # 指示条的左上角 x 坐标
+                y = int(big_h/3)  # 指示条的左上角 y 坐标
                 width = 100  # 指示条的宽度
                 height = 300  # 指示条的高度
                 color = (0, 255, 0)  # 指示条的颜色 (B, G, R)
@@ -891,6 +903,8 @@ class HUD_INFO(object):
         self.config_name = "test"
         self.behavior_type = "test"
         self.scenario_id = 0
+        self.left_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
+        self.right_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
     
     def is_end (self, cur_x, cur_y, end_point):
         is_end = False
@@ -904,15 +918,15 @@ class HUD_INFO(object):
 def get_prediction(cur_tf, vel, steer, horizon, dt):
     trajectory = []
     L = 4.0
-    x0, y0, yaw0 = cur_tf.location.x, cur_tf.location.y, math.radians(cur_tf.rotation.yaw)
+    x0, y0, z0, yaw0 = cur_tf.location.x, cur_tf.location.y, cur_tf.location.z, math.radians(cur_tf.rotation.yaw)
     # trajectory.append([x0, y0, yaw0, vel])
-    trajectory.append([x0, y0, yaw0, vel])
+    trajectory.append([x0, y0, yaw0, vel, z0])
     for idx in range(horizon):
         x1 = x0 + vel*math.cos(yaw0)*dt
         y1 = y0 + vel*math.sin(yaw0)*dt
         yaw1 = yaw0 + vel / L * math.tan(steer)*dt
         x0, y0, yaw0 = x1, y1, yaw1
-        trajectory.append([x1, y1, yaw1, vel])
+        trajectory.append([x1, y1, yaw1, vel, z0])
 
     return trajectory
 
@@ -971,6 +985,35 @@ def process_semantic_image(image, image_sematic_queue, queue_len):
     image_sematic_queue.append(array)
     if len(image_sematic_queue) > queue_len:
         image_sematic_queue.pop(0)
+
+
+def where_is_risk(img, angle, risk):
+    height, width, channels = img.shape
+    new_img = img.copy()
+
+    center = (width//2, height//4*3)
+    radius = min(width, height) // 6
+    start_angle = 0
+    end_angle = 60
+    thickness = 30 + math.floor(risk/1)
+    color1 = (0, 0, 255, 128)  # 红色,透明度 50%
+    color2 = (0, 165, 255, 128)  # 橙色,透明度 50%
+
+    cv2.ellipse(new_img, center, (radius, radius), 0, 15, 75, color1, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, 105, 165, color2, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, -15, -75, color2, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, -105, -165, color1, thickness, cv2.LINE_AA)
+
+    x1, y1 = width//3, 100
+    x2, y2 = width//3, 500
+    cv2.line(new_img, (x1, y1), (x1+width//3, y1), (0, 250, 0), thickness, cv2.LINE_AA)
+    # cv2.line(new_img, (x2, y2), (x2+300, y2), (0, 165, 255), thickness, cv2.LINE_AA)
+
+    alpha = risk/100
+    blended = cv2.addWeighted(img, 1-alpha, new_img, alpha, 0)
+
+    return blended
+
 # ==============================================================================================
 
 
@@ -1026,6 +1069,30 @@ def game_loop(args):
         diy_actor_list.append(camera_top)
         image_top_queue = []
         camera_top.listen(lambda image: process_semantic_image(image, image_top_queue, QUEUE_LEN))
+        # FRONT
+        camera_front = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=0.3, z=1.9), 
+                                 carla.Rotation(pitch=0)), world.player, IM_WIDTH, IM_HEIIGHT, 120 )
+        diy_actor_list.append(camera_front)
+        image_front_queue = []
+        camera_front.listen(lambda image: process_rgb_image(image, image_front_queue, QUEUE_LEN))
+        # LEFT
+        camera_left = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=-2,z=1.5), 
+                                 carla.Rotation(pitch=-0,yaw=-170)), world.player, 640, 480, 90 )
+        diy_actor_list.append(camera_left)
+        image_left_queue = []
+        camera_left.listen(lambda image: process_rgb_image(image, image_left_queue, QUEUE_LEN))
+
+        # RIGHT
+        camera_right = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=2,z=1.5), 
+                                 carla.Rotation(pitch=-0,yaw=-190)), world.player, 640, 480, 90 )
+        diy_actor_list.append(camera_right)
+        image_right_queue = []
+        camera_right.listen(lambda image: process_rgb_image(image, image_right_queue, QUEUE_LEN))
+
+        ### Initialize camera
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, IM_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, IM_HEIIGHT)
 
         clock = pygame.time.Clock()
         while True:
@@ -1042,7 +1109,7 @@ def game_loop(args):
             # limit speed
             vel = world.player.get_velocity()
             ego_speed = math.sqrt(max(5, (vel.x ** 2 + vel.y ** 2 + vel.z ** 2)))
-            limated_speed = 20.0 # km/h
+            limated_speed = 45.0 # km/h
             if ego_speed*3.6 > limated_speed:
                 v_error = abs(ego_speed - limated_speed)
                 k_p_break = 0.005
@@ -1076,23 +1143,17 @@ def game_loop(args):
             # carla_word.debug.draw_box(box, ego_tf.rotation,thickness=0.005, life_time=0.05)
 
             # prediction
-            speed_scale = 3
-            steer_scale = 0.3
+            SCALE = 0.05
             horizon, dt = 6, 0.5
             vel = world.player.get_velocity()
             speed = math.sqrt(max(5, (vel.x ** 2 + vel.y ** 2 + vel.z ** 2)))
             steer = world.player.get_control().steer
-            steer = steer * 0.2
-            steer = max(-0.1, steer)
-            steer = min( 0.1, steer)
-            ego_trajectory = get_prediction(ego_tf, speed, steer*steer_scale, horizon, dt)
+            ego_trajectory = get_prediction(ego_tf, speed, steer*SCALE, horizon, dt)
 
-            diy_ego_tf = carla.Transform(carla.Location(x=320, y=280, z=0), 
-                                         carla.Rotation(pitch=0, yaw=-90, roll=0))
-            diy_ego_traj = get_prediction(diy_ego_tf, speed*speed_scale, steer*steer_scale, horizon, dt)
 
             # get surounding vehicles
             other_trajectory = []
+            diy_ego_traj = []
             diy_other_traj = []
             vehicles = client.get_world().get_actors().filter('vehicle.*')
             ego_id = world.player.id
@@ -1102,38 +1163,65 @@ def game_loop(args):
                     other_steer = vehicle.get_control().steer
                     other_vel = vehicle.get_velocity()
                     other_speed = math.sqrt(max(5, (other_vel.x ** 2 + other_vel.y ** 2 + other_vel.z ** 2)))
-                    other_trajectory = get_prediction(other_tf, other_speed, other_steer*steer_scale, horizon, dt) 
+                    other_trajectory = get_prediction(other_tf, other_speed, other_steer*SCALE, horizon, dt)
+  
 
-                    delta_x = other_tf.location.x - ego_tf.location.x
-                    delta_y = other_tf.location.y - ego_tf.location.y
-                    delta_yaw = math.radians(other_tf.rotation.yaw - ego_tf.rotation.yaw)
-                    
-                    diy_scale = 1
+
+                    delta_x = (other_tf.location.x - ego_tf.location.x)
+                    delta_y = (other_tf.location.y - ego_tf.location.y)
+                    delta_yaw = -math.radians(ego_tf.rotation.yaw)
+                    distance_scale = 12
+                    speed_scale = 5
+                    steer_scale = -1/speed_scale
+                    diy_ego_tf   = carla.Transform(carla.Location(x=0, y=0, z=0), 
+                                                carla.Rotation(pitch=0, yaw= 90, roll=0))
+                    # 旋转至 ego frame
                     diy_other_tf = carla.Transform(
-                                   carla.Location(x = (delta_x*math.cos(delta_yaw) - delta_y*math.sin(delta_yaw))*diy_scale + diy_ego_tf.location.x, 
-                                                  y = (delta_x*math.sin(delta_yaw) + delta_y*math.cos(delta_yaw))*diy_scale + diy_ego_tf.location.y, z=0), 
-                                   carla.Rotation(pitch=0, yaw=delta_yaw - 90, roll=0))
-                    diy_other_traj = get_prediction(diy_other_tf, other_speed*speed_scale, other_steer*steer_scale, horizon, dt)    
+                                carla.Location(x=(delta_y*math.cos(delta_yaw) + delta_x*math.sin(delta_yaw))*distance_scale,
+                                               y=(delta_y*math.sin(delta_yaw) - delta_x*math.sin(delta_yaw))*distance_scale, z=0), 
+                                carla.Rotation(pitch=0, yaw=other_tf.rotation.yaw - ego_tf.rotation.yaw - 90, roll=0))
+                    # 再转 90°
+                    # diy_other_tf = carla.Transform(
+                    #                 carla.Location(x = -diy_other_tf.location.y, y = -diy_other_tf.location.x, z=0), 
+                    #                 carla.Rotation(pitch=0, yaw=diy_other_tf.rotation.yaw + 90, roll=0))
+                    diy_ego_traj   = get_prediction(diy_ego_tf, ego_speed*speed_scale, steer*steer_scale, horizon, dt)
+                    diy_other_traj = get_prediction(diy_other_tf, other_speed*speed_scale, -other_steer*steer_scale, horizon, dt)
 
 
             # =================================== risk aware  =================================
             all_risk = 0.0
+            risk_list = []
+            risk_list.append(all_risk)
             DISTANCE_MAX = 10
             DISTANCE_MIN = 0.1
             for idx,waypoint in enumerate(ego_trajectory):
                 ego_x = waypoint[0]
                 ego_y = waypoint[1]
+                ego_z = waypoint[4]
 
+                other_x,other_y,other_z = 0.0, 0.0, 0.0
                 if len(other_trajectory) > 0:
                     other_x = other_trajectory[idx][0]
                     other_y = other_trajectory[idx][1]
+                    other_z = other_trajectory[idx][4]
                     distance = math.sqrt( (ego_x-other_x)**2 + (ego_y-other_y)**2 )
+                    
                     if distance < DISTANCE_MAX:
+                        DISTANCE_MAX = DISTANCE_MAX *(0.6+idx*0.1)
                         distance = max(DISTANCE_MIN+0.01, distance)
-                        risk = (distance - DISTANCE_MIN) / (DISTANCE_MAX-DISTANCE_MIN)
-                        all_risk += risk * 100
-
-            all_risk = min(100, all_risk/horizon)
+                        risk = (distance - DISTANCE_MIN) / (DISTANCE_MAX-DISTANCE_MIN) * (1-idx*0.05)
+                        risk_list.append(risk * 100)
+                # plot trajectory box
+                if idx%2==1 and idx>2:
+                    box = world.player.bounding_box
+                    box.location = carla.Location(x=ego_x, y=ego_y, z=ego_z+1.0)
+                    box.extent = carla.Vector3D(0.1, 0.1, 0.2)
+                    client.get_world().debug.draw_box(box, ego_tf.rotation,thickness=0.01, life_time=0.05)
+                    box = world.player.bounding_box
+                    box.location = carla.Location(x=other_x, y=other_y, z=other_z+1.0)
+                    box.extent = carla.Vector3D(0.1, 0.1, 0.2)
+                    client.get_world().debug.draw_box(box, ego_tf.rotation,thickness=0.01, life_time=0.05)
+            all_risk = min(100, max(risk_list)) 
 
             # hud info publish
             hud_info = HUD_INFO()
@@ -1142,30 +1230,63 @@ def game_loop(args):
             hud_info.behavior_type = world.scenario_config[world.scenario_idx]['behavior_type']
             hud_info.scenario_id = world.scenario_config[world.scenario_idx]['scenario_id']
             hud_info.config_name = args.config
+            if len(image_left_queue)>1:
+                image_left = image_left_queue[-1]
+                hud_info.left_mirror = image_left
+            if len(image_right_queue)>1:
+                image_right = image_right_queue[-1]
+                hud_info.right_mirror = image_right
+
+            end_point = world.scenario_config[world.scenario_idx]['ego_end_point']
+            if hud_info.is_end(ego_tf.location.x, ego_tf.location.y, end_point):
+                world.enable_recording = False
+
+
+
             hud_info_queue.append(hud_info)
             if len(hud_info_queue) > 3:
                 hud_info_queue.pop(0)
             # ===================================================================================
 
+
+            # diy_ego_x = [row[0] for row in diy_ego_traj]
+            # diy_ego_y = [row[1] for row in diy_ego_traj]
+            # p1 = plt.subplot(1, 1, 1)
+            # p1.cla()
+            # p1.plot(diy_ego_x, diy_ego_y, label='diy_ego')
+            # p1.scatter(diy_ego_x[0], diy_ego_y[0])
+            # diy_other_x = [row[0] for row in diy_other_traj]
+            # diy_other_y = [row[1] for row in diy_other_traj]
+            # p1.plot(diy_other_x, diy_other_y, label='diy_other')
+            # p1.scatter(diy_other_x[0], diy_other_y[0])
+            # p1.axis('equal')
+            # p1.legend()
+            # # p1.show()
+            # plt.pause(0.001)
+
+
+
             # visualize predicted trajectory
             if len(image_top_queue)>1:
                 image_top = image_top_queue[-1]
-
+                
+                x_offset = 320
+                y_offset = 280
                 ego_points = []
                 for waypoint in diy_ego_traj:
-                    ego_points.append( [waypoint[0], waypoint[1]] )
+                    ego_points.append( [waypoint[0]+x_offset, -waypoint[1]+y_offset] )
                 ego_points = np.array(ego_points, np.int32)
                 ego_points = ego_points.reshape((-1, 1, 2))
 
                 other_points = []
                 for waypoint in diy_other_traj:
-                    other_points.append( [waypoint[0], waypoint[1]] )
+                    other_points.append( [waypoint[0]+x_offset, waypoint[1]+y_offset] )
                 other_points = np.array(other_points, np.int32)
                 other_points = other_points.reshape((-1, 1, 2))
 
                 cv2.polylines(image_top, [ego_points], isClosed=False, color=(0, 255, 0), thickness=10)
-                cv2.polylines(image_top, [other_points], isClosed=False, color=(0, 255, 0), thickness=10)
-                cv2.imshow("output", image_top)
+                # cv2.polylines(image_top, [other_points], isClosed=False, color=(0, 255, 0), thickness=10)
+                # cv2.imshow("output", image_top)
 
 
             current_time = datetime.datetime.now()
@@ -1211,8 +1332,10 @@ def main():
     argparser.add_argument(
         '--host',
         metavar='H',
-        default='10.22.5.52',
-        # default='127.0.0.1',
+        # default='10.22.5.52',
+        default='127.0.0.1',
+        # default='192.168.50.151',
+        # default='192.168.5.3',
         help='IP of the host server (default: 127.0.0.1)')
     argparser.add_argument(
         '-p', '--port',
@@ -1227,7 +1350,7 @@ def main():
     argparser.add_argument(
         '--res',
         metavar='WIDTHxHEIGHT',
-        default='1920x1080',
+        default='5120x1080',
         help='window resolution (default: 1920x1080)')
     argparser.add_argument(
         '--filter',

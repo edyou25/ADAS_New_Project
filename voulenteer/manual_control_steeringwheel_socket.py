@@ -78,6 +78,7 @@ else:
 
     from ConfigParser import RawConfigParser as ConfigParser
 
+# keyboard
 try:
     import pygame
     from pygame.locals import KMOD_CTRL
@@ -752,7 +753,8 @@ class CameraManager(object):
         self.recording = False
         self._camera_transforms = [
             carla.Transform(carla.Location(x=-5.5, z=2.8), carla.Rotation(pitch=-15)),
-            carla.Transform(carla.Location(x=0.0, y=0.2,z=1.2))]
+            carla.Transform(carla.Location(x=0.42, y=0.27,z=1.4),carla.Rotation(pitch=-10))]
+        # carla.Transform(carla.Location(x=0.3, y=0.35,z=1.3),carla.Rotation(pitch=-15))]
         self.transform_index = 1
         self.sensors = [
             ['sensor.camera.rgb', cc.Raw, 'Camera RGB'],
@@ -770,7 +772,7 @@ class CameraManager(object):
             if item[0].startswith('sensor.camera'):
                 bp.set_attribute('image_size_x', str(hud.dim[0]))
                 bp.set_attribute('image_size_y', str(hud.dim[1]))
-                bp.set_attribute('fov', str(110))
+                bp.set_attribute('fov', str(130))
             elif item[0].startswith('sensor.lidar'):
                 bp.set_attribute('range', '50')
             item.append(bp)
@@ -844,10 +846,21 @@ class CameraManager(object):
                 ego_risk = hud_info.ego_risk
 
                 array = cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
-                # cv2.putText(array, str(self.ego_risk), (600, 335), cv2.FONT_HERSHEY_COMPLEX, 0.9, (0, 0, 255), 1)
-                
-                x = 1700  # 指示条的左上角 x 坐标
-                y = 900  # 指示条的左上角 y 坐标
+                # array = where_is_risk(array, 0, ego_risk)
+                left_image = hud_info.left_mirror
+                right_image = hud_info.right_mirror
+                big_h, big_w, _ = array.shape
+                small_h1, small_w1, _ = left_image.shape
+                small_h2, small_w2, _ = right_image.shape
+                x1 = 300
+                y1 = 500
+                x2 = big_w - small_w2 - x1 
+                y2 = y1
+                array[y1:y1+small_h1, x1:x1+small_w1] = left_image
+                array[y2:y2+small_h2, x2:x2+small_w2] = right_image
+
+                x = int(big_w/3*2)  # 指示条的左上角 x 坐标
+                y = int(big_h/3)  # 指示条的左上角 y 坐标
                 width = 100  # 指示条的宽度
                 height = 300  # 指示条的高度
                 color = (0, 255, 0)  # 指示条的颜色 (B, G, R)
@@ -878,8 +891,15 @@ class CameraManager(object):
                 config_name = hud_info.config_name
                 cv2.putText(array, 'Behavior: '+ behavior_type + '   ' + str(scenario_id), (50, 950), cv2.FONT_HERSHEY_COMPLEX, 0.7, (250, 255, 250), 1)
                 cv2.putText(array, 'Config:   ' + config_name, (50, 1000), cv2.FONT_HERSHEY_COMPLEX, 0.7, (250, 255, 250), 1)
+
+
+
+
+
                 array = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
     
+            
+
             self.surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
         if self.recording:
             image.save_to_disk('out/%08d' % image.frame)
@@ -891,6 +911,8 @@ class HUD_INFO(object):
         self.config_name = "test"
         self.behavior_type = "test"
         self.scenario_id = 0
+        self.left_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
+        self.right_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
     
     def is_end (self, cur_x, cur_y, end_point):
         is_end = False
@@ -971,6 +993,35 @@ def process_semantic_image(image, image_sematic_queue, queue_len):
     image_sematic_queue.append(array)
     if len(image_sematic_queue) > queue_len:
         image_sematic_queue.pop(0)
+
+
+def where_is_risk(img, angle, risk):
+    height, width, channels = img.shape
+    new_img = img.copy()
+
+    center = (width//2, height//4*3)
+    radius = min(width, height) // 6
+    start_angle = 0
+    end_angle = 60
+    thickness = 30 + math.floor(risk/1)
+    color1 = (0, 0, 255, 128)  # 红色,透明度 50%
+    color2 = (0, 165, 255, 128)  # 橙色,透明度 50%
+
+    cv2.ellipse(new_img, center, (radius, radius), 0, 15, 75, color1, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, 105, 165, color2, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, -15, -75, color2, thickness, cv2.LINE_AA)
+    cv2.ellipse(new_img, center, (radius, radius), 0, -105, -165, color1, thickness, cv2.LINE_AA)
+
+    x1, y1 = width//3, 100
+    x2, y2 = width//3, 500
+    cv2.line(new_img, (x1, y1), (x1+width//3, y1), (0, 250, 0), thickness, cv2.LINE_AA)
+    # cv2.line(new_img, (x2, y2), (x2+300, y2), (0, 165, 255), thickness, cv2.LINE_AA)
+
+    alpha = risk/100
+    blended = cv2.addWeighted(img, 1-alpha, new_img, alpha, 0)
+
+    return blended
+
 # ==============================================================================================
 
 
@@ -1014,18 +1065,30 @@ def game_loop(args):
         IM_WIDTH = 640
         IM_HEIIGHT = 480
         QUEUE_LEN = 5
-        camera_top = init_camera(client.get_world(), 'SemanticCamera', carla.Transform(carla.Location(x=5, y=0,z=25.0), 
-                                 carla.Rotation(pitch=-90)), world.player, IM_WIDTH, IM_HEIIGHT, 90 )
-        diy_actor_list.append(camera_top)
-        image_top_queue = []
-        camera_top.listen(lambda image: process_semantic_image(image, image_top_queue, QUEUE_LEN))
-
+        # camera_top = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=5, y=0,z=15.0), 
+        #                          carla.Rotation(pitch=-0)), world.player, 320, 240, 90 )
+        # diy_actor_list.append(camera_top)
+        # image_top_queue = []
+        # camera_top.listen(lambda image: process_rgb_image(image, image_top_queue, QUEUE_LEN))
+        # FRONT
         camera_front = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=0.3, z=1.9), 
                                  carla.Rotation(pitch=0)), world.player, IM_WIDTH, IM_HEIIGHT, 120 )
         diy_actor_list.append(camera_front)
         image_front_queue = []
         camera_front.listen(lambda image: process_rgb_image(image, image_front_queue, QUEUE_LEN))
+        # LEFT
+        camera_left = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=-2,z=1.5), 
+                                 carla.Rotation(pitch=-0,yaw=-170)), world.player, 640, 480, 90 )
+        diy_actor_list.append(camera_left)
+        image_left_queue = []
+        camera_left.listen(lambda image: process_rgb_image(image, image_left_queue, QUEUE_LEN))
 
+        # RIGHT
+        camera_right = init_camera(client.get_world(), 'RGBCamera', carla.Transform(carla.Location(x=2, y=2,z=1.5), 
+                                 carla.Rotation(pitch=-0,yaw=-190)), world.player, 640, 480, 90 )
+        diy_actor_list.append(camera_right)
+        image_right_queue = []
+        camera_right.listen(lambda image: process_rgb_image(image, image_right_queue, QUEUE_LEN))
 
         clock = pygame.time.Clock()
         while True:
@@ -1042,7 +1105,7 @@ def game_loop(args):
             # limit speed
             vel = world.player.get_velocity()
             ego_speed = math.sqrt(max(5, (vel.x ** 2 + vel.y ** 2 + vel.z ** 2)))
-            limated_speed = 45.0 # km/h
+            limated_speed = 35.0 # km/h
             if ego_speed*3.6 > limated_speed:
                 v_error = abs(ego_speed - limated_speed)
                 k_p_break = 0.005
@@ -1090,16 +1153,26 @@ def game_loop(args):
 
 
             # =================================== do something  =================================
-            if len(image_top_queue)>1:
-                image_top = image_top_queue[-1]
-                cv2.imshow("output", image_top)
-            
+            # if len(image_left_queue)>1:
+            #     image_left = image_left_queue[-1]
+            #     cv2.imshow("<<<<<--- LEFT", image_left)
+            # if len(image_right_queue)>1:
+            #     image_right = image_right_queue[-1]
+            #     cv2.imshow("RIGHT --->>>>>", image_right)
+
+
             hud_info = HUD_INFO()
             hud_info.ego_risk = ego_speed*3.6
             hud_info.is_recording = world.enable_recording
             hud_info.behavior_type = world.scenario_config[world.scenario_idx]['behavior_type']
             hud_info.scenario_id = world.scenario_config[world.scenario_idx]['scenario_id']
             hud_info.config_name = args.config
+            if len(image_left_queue)>1:
+                image_left = image_left_queue[-1]
+                hud_info.left_mirror = image_left
+            if len(image_right_queue)>1:
+                image_right = image_right_queue[-1]
+                hud_info.right_mirror = image_right
 
             end_point = world.scenario_config[world.scenario_idx]['ego_end_point']
             if hud_info.is_end(ego_tf.location.x, ego_tf.location.y, end_point):
@@ -1174,7 +1247,9 @@ def main():
     argparser.add_argument(
         '--res',
         metavar='WIDTHxHEIGHT',
-        default='1920x1080',
+        default='5120x1080',
+        # default='3840x2160',
+        # default='1920x1080',
         help='window resolution (default: 1920x1080)')
     argparser.add_argument(
         '--filter',

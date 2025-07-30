@@ -1141,9 +1141,11 @@ def game_loop(args):
             hud_info.config_name = args.config
             if len(image_left_queue)>1:
                 image_left = image_left_queue[-1]
+                image_left = cv2.flip(image_left, 1)  # 1 表示水平翻转
                 hud_info.left_mirror = image_left
             if len(image_right_queue)>1:
                 image_right = image_right_queue[-1]
+                image_right = cv2.flip(image_right, 1)  # 1 表示水平翻转
                 hud_info.right_mirror = image_right
 
             end_point = world.scenario_config[world.scenario_idx]['ego_end_point']

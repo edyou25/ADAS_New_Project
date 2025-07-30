@@ -270,7 +270,8 @@ def synchronization_loop(args):
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(description=__doc__)
-    argparser.add_argument('sumo_cfg_file', type=str, help='sumo configuration file')
+    # argparser.add_argument('sumo_cfg_file', type=str, help='sumo configuration file')
+    argparser.add_argument('sumo_cfg_file', type=str, nargs='?', default='sumo/HKPolyU0921.sumocfg', help='sumo configuration file')
     argparser.add_argument('--carla-host',
                            metavar='H',
                            default='127.0.0.1',
@@ -291,9 +292,9 @@ if __name__ == '__main__':
                            help='TCP port to listen to (default: 8813)')
     argparser.add_argument('--sumo-gui', action='store_true', help='run the gui version of sumo')
     argparser.add_argument('--step-length',
-                           default=0.05,
+                           default=0.08,
                            type=float,
-                           help='set fixed delta seconds (default: 0.05s)')
+                           help='set fixed delta seconds (default: 0.08s)')
     argparser.add_argument('--client-order',
                            metavar='TRACI_CLIENT_ORDER',
                            default=1,
@@ -312,7 +313,7 @@ if __name__ == '__main__':
                            type=str,
                            choices=['none', 'sumo', 'carla'],
                            help="select traffic light manager (default: none)",
-                           default='none')
+                           default='sumo')
     argparser.add_argument('--debug', action='store_true', help='enable debug messages')
     arguments = argparser.parse_args()
 

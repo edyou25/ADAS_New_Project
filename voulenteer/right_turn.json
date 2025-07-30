@@ -64,7 +64,7 @@
         "ego_start_point": {
             "x": 29.1,
             "y": -112.3,
-            "z": 4,
+            "z": 5,
             "yaw": 133
         },
         "ego_end_point": {

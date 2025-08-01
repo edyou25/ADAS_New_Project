@@ -6,6 +6,7 @@ import numpy as np
 import math
 import random
 import time
+import socket
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -243,7 +244,7 @@ def predict_bicycle_trajectory(vehicle, predict_time=5.0, dt=0.5, wheelbase=2.8)
 
 
 def draw_trajectory_on_image(image, traj_world, camera_transform, camera_K, extrinsic, 
-                            alpha=0.5, min_thickness=100, max_thickness=150):
+                            alpha=0.5, min_thickness=50, max_thickness=80):
     cam_xyz = world_to_camera_blog(traj_world, extrinsic)
     zs = cam_xyz[2, :]
     valid = zs < 0
@@ -277,7 +278,7 @@ def draw_trajectory_on_image(image, traj_world, camera_transform, camera_K, extr
     result = cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
     return result
 
-def draw_steering_arrow(image, steer, mode="lane_change"):
+def draw_steering_arrow(image, steer, velocity_kmh, mode="lane_change"):
     height, width = image.shape[:2]
     color = (0, 255, 255)
     thickness = 8
@@ -299,7 +300,12 @@ def draw_steering_arrow(image, steer, mode="lane_change"):
     text_org = (center[0] - textsize[0] // 2, min(center[1] + 60, height - 10))
 
     if mode == "lane_change":
-        if steer > 0.30:
+        if velocity_kmh < 10:
+            # 车道保持
+            action_text = "Lane Keeping"
+            center = (int(width * 0.5), int(height * 0.8))
+            end = (center[0], center[1] - length)
+        elif steer > 0.30:
             # 右转
             action_text = "Right Turn"
             center = (int(width * 0.85), int(height * 0.85))
@@ -342,6 +348,27 @@ def run_simulation(cfg, client):
     actor_list = []
     try:
         world = client.get_world()
+        original_settings = world.get_settings()
+        vehicle = None
+        # Instanciating the vehicle
+        if cfg['use_socket']==True:
+            # intialize socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            server_address = (cfg['socket_address'], cfg['socket_port'])  # 设置接收方的IP地址和端口号
+            sock.bind(server_address)
+            data, address = sock.recvfrom(4096)
+            ego_id = int(data.decode())
+            print('Ego ID: ', ego_id)
+            # close socket
+            sock.close()
+            vehicle = world.get_actor(ego_id)
+        else: # creat vehicle
+            bp = world.get_blueprint_library().filter('charger_2020')[0]
+            vehicle = world.spawn_actor(bp, random.choice(world.get_map().get_spawn_points()))
+            actor_list.append(vehicle)
+            # vehicle.set_autopilot(True)
+        ego_id = vehicle.id
+
         if cfg['sync_mode']:
             traffic_manager = client.get_trafficmanager(8000)
             settings = world.get_settings()
@@ -350,10 +377,10 @@ def run_simulation(cfg, client):
             settings.fixed_delta_seconds = 0.010
             world.apply_settings(settings)
 
-        bp = world.get_blueprint_library().filter('vehicle.*')[0]
-        vehicle = world.spawn_actor(bp, random.choice(world.get_map().get_spawn_points()))
-        actor_list.append(vehicle)
-        vehicle.set_autopilot(True)
+        # bp = world.get_blueprint_library().filter('vehicle.*')[0]
+        # vehicle = world.spawn_actor(bp, random.choice(world.get_map().get_spawn_points()))
+        # actor_list.append(vehicle)
+        # vehicle.set_autopilot(True)
 
         IM_WIDTH = cfg['cam_width']
         IM_HEIGHT = cfg['cam_height']
@@ -374,7 +401,7 @@ def run_simulation(cfg, client):
         CAMERA_FOV_INTECTION = 120
         camera_intection = init_camera(
             world, 'RGBCamera',
-            carla.Transform(carla.Location(x=120.0, y=20.0, z=10), carla.Rotation(pitch=-20, yaw=180, roll=0)),
+            carla.Transform(carla.Location(x=20.0, y=-102.0, z=10), carla.Rotation(pitch=-20, yaw=130, roll=0)),
             None, IM_WIDTH, IM_HEIGHT, CAMERA_FOV_INTECTION
         )
         actor_list.append(camera_intection)
@@ -387,7 +414,7 @@ def run_simulation(cfg, client):
         print(f"camera_intection.attributes: {camera_intection.attributes}")
 
 
-        target_fps = 30
+        target_fps = 15
         target_period = 1.0 / target_fps  # 单位：秒
         while True:
             if cfg['sync_mode']:
@@ -407,7 +434,7 @@ def run_simulation(cfg, client):
                 image_intection, num_actors = draw_fixed_bbox_on_image(
                     image_intection, world, camera_intection_tf, K_intection,
                     max_distance=90.0, ego_vehicle=vehicle, camera_fov_deg=CAMERA_FOV_INTECTION)
-                cv2.imshow("intection", image_intection)
+                cv2.imshow("RoadSide", image_intection)
                 
             if len(camera_onboard_img_queue) > 1:
                 image_onboard = camera_onboard_img_queue[-1].copy()
@@ -421,7 +448,7 @@ def run_simulation(cfg, client):
                 )
                 # 画转向箭头
                 steer = vehicle.get_control().steer
-                image_onboard = draw_steering_arrow(image_onboard, steer, mode="lane_change")
+                image_onboard = draw_steering_arrow(image_onboard, steer, ego_velocity_kmh, mode="lane_change")
 
                 # 画3D包围盒
                 image_onboard, num_actors = draw_fixed_bbox_on_image(
@@ -433,7 +460,7 @@ def run_simulation(cfg, client):
                 cv2.putText(image_onboard, speed_inform, (30, 35), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
                 cv2.putText(image_onboard, wheel_angle_inform, (30, 60), cv2.FONT_HERSHEY_COMPLEX, 0.6, (255, 0, 0), 1)
 
-                cv2.imshow("onboard", image_onboard)
+                cv2.imshow("Onboard", image_onboard)
                 cv2.waitKey(5)
 
             time_end = time.time()
@@ -449,6 +476,8 @@ def run_simulation(cfg, client):
             actor.destroy()
         cv2.destroyAllWindows()
         print('destroy all actor')
+        if cfg['use_socket']==True:
+            world.apply_settings(original_settings)   
 
 def main():
     try:
@@ -457,7 +486,10 @@ def main():
         client = carla.Client(host, port)
         client.set_timeout(10.0)
         cfg = {
+            'socket_address': '127.0.0.1',
+            'socket_port': 12345,
             'sync_mode': False,
+            'use_socket': True,
             'cam_width': 1280,
             'cam_height': 720,
             'cam_fov': 90,

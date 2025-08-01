@@ -25,7 +25,7 @@ from __future__ import print_function
 # -- find carla module ---------------------------------------------------------
 # ==============================================================================
 
-
+from plot_box_utils import *
 import glob
 import os
 import sys
@@ -892,8 +892,17 @@ class CameraManager(object):
                 cv2.putText(array, 'Behavior: '+ behavior_type + '   ' + str(scenario_id), (50, 950), cv2.FONT_HERSHEY_COMPLEX, 0.7, (250, 255, 250), 1)
                 cv2.putText(array, 'Config:   ' + config_name, (50, 1000), cv2.FONT_HERSHEY_COMPLEX, 0.7, (250, 255, 250), 1)
 
-
-
+                # 绘制3D 检测结果
+                world = self._parent.get_world()
+                camera_onboard_tf = self.sensor.get_transform()
+                CAMERA_FOV = 130
+                K_onboard = get_camera_intrinsic(self.hud.dim[0], self.hud.dim[1], CAMERA_FOV)
+                print("Camera Onboard Transform:", camera_onboard_tf)
+                # 画3D包围盒
+                array, num_actors = draw_fixed_bbox_on_image(
+                    array, world, camera_onboard_tf, K_onboard,
+                    max_distance=100.0, ego_vehicle=hud_info.ego_vehicle, camera_fov_deg=CAMERA_FOV)
+                # print(f"Number of selected actors: {num_actors}")
 
 
                 array = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
@@ -913,7 +922,11 @@ class HUD_INFO(object):
         self.scenario_id = 0
         self.left_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
         self.right_mirror = np.full((500, 500, 3), 255, dtype=np.uint8)
-    
+        self.camera_onboard_tf = None
+        self.camera_onboard_K = None
+        self.camera_onboard_fov = None
+        self.ego_vehicle = None
+
     def is_end (self, cur_x, cur_y, end_point):
         is_end = False
         distance = math.sqrt( (cur_x-end_point['x'])**2 + (cur_y-end_point['y'])**2 )
@@ -1105,7 +1118,7 @@ def game_loop(args):
             # limit speed
             vel = world.player.get_velocity()
             ego_speed = math.sqrt(max(5, (vel.x ** 2 + vel.y ** 2 + vel.z ** 2)))
-            limated_speed = 35.0 # km/h
+            limated_speed = 45.0 # km/h
             if ego_speed*3.6 > limated_speed:
                 v_error = abs(ego_speed - limated_speed)
                 k_p_break = 0.005
@@ -1167,6 +1180,10 @@ def game_loop(args):
             hud_info.behavior_type = world.scenario_config[world.scenario_idx]['behavior_type']
             hud_info.scenario_id = world.scenario_config[world.scenario_idx]['scenario_id']
             hud_info.config_name = args.config
+            hud_info.ego_vehicle = world.player
+
+            
+
             if len(image_left_queue)>1:
                 image_left = image_left_queue[-1]
                 image_left = cv2.flip(image_left, 1)  # 1 表示水平翻转
